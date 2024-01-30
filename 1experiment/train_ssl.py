@@ -76,6 +76,13 @@ def sampler(dataset):
     random.shuffle(indices)
     return iter(indices)
 
+def logging():
+    text = f""
+    # Open a file in write mode
+    with open('logs.txt', 'a') as file:
+        file.write(text)
+    return ""
+
 def main():
     train_data_path = "../csv_files/dummy_test.csv"
     eval_data_path = "../csv_files/dummy_test.csv"

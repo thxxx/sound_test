@@ -76,6 +76,24 @@ def sampler(dataset):
     random.shuffle(indices)
     return iter(indices)
 
+def logging():
+    text = f""
+    # Open a file in write mode
+    with open('logs.txt', 'a') as file:
+        file.write(text)
+    return ""
+
+class Logger():
+    def __init__(self):
+        self.tt = ""
+
+    def init(self):
+        random_text = "aaa"
+        os.makedir(random_text)
+
+    def logging():
+        
+
 def main():
     train_data_path = "../csv_files/dummy_test.csv"
     eval_data_path = "../csv_files/dummy_test.csv"
