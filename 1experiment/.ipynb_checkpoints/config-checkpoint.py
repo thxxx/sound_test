@@ -42,7 +42,7 @@ class Config:
         self.condition_dim = 1536
 
     def update_hyperparameter_config(self):
-        self.batch_size = 16
+        self.batch_size = 1
         self.eval_batch_size = 2
         self.learning_rate = 3e-6
         self.adam_beta1 = 0.9

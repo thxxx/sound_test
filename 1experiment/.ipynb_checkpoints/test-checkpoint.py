@@ -10,7 +10,7 @@ csv_rows = [["audio_path", "caption", "duration"]]
 for file_path in files:
     info = sf.info(path+"/"+file_path)
     duration = info.frames / info.samplerate # Calculate the duration in seconds
-    csv_rows.append([file_path, "", duration])
+    csv_rows.append([f"/workspace/sound_test/dataset/{file_path}", "", duration])
 
 # CSV 파일 열기
 with open("../csv_files/dummy_test.csv", 'w', newline='') as file:

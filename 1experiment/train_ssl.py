@@ -77,8 +77,8 @@ def sampler(dataset):
     return iter(indices)
 
 def main():
-    train_data_path = f"../csv_files/dummy_test.csv"
-    eval_data_path = f"../csv_files/dummy_test.csv"
+    train_data_path = "../csv_files/dummy_test.csv"
+    eval_data_path = "../csv_files/dummy_test.csv"
     
     cfg = Config()
     cfg.update(train_data_path=train_data_path, eval_data_path=eval_data_path)
@@ -89,16 +89,18 @@ def main():
     
     with accelerator.main_process_first():  
         compression_model, lm = build_model(cfg)
-        audio_dataset = AudioDataset(cfg, train=True) 
-        eval_dataset = AudioDataset(cfg, train=False)
+        audio_dataset = AudioDataset(cfg, data_path=cfg.train_data_path, train=True) 
+        eval_dataset = AudioDataset(cfg, data_path=cfg.eval_data_path, train=False)
     compression_model.eval()
     
     model = AudioProcessing(cfg, lm)
     test_dataset = TestDataset(cfg)
-    
+
+    print("데이터셋 준비")
     audio_dataloader = DataLoader(audio_dataset, batch_size=cfg.batch_size, shuffle=False, sampler=sampler(audio_dataset), num_workers=12)
     eval_dataloader = DataLoader(eval_dataset, batch_size=cfg.eval_batch_size, shuffle=False, num_workers=4)
     test_dataloader = DataLoader(test_dataset, batch_size=1)
+    print("데이터셋 준비 끝")
 
     optimizer_parameters = [param for param in model.lm.parameters() if param.requires_grad]
     
@@ -109,7 +111,7 @@ def main():
         eps=cfg.adam_epsilon,
     )
     
-    num_update_steps_per_epoch = math.ceil(len(audio_dataloader) / cfg.gradient_accumulation_steps)
+    num_update_steps_per_epoch = math.ceil((len(audio_dataset)/cfg.batch_size) / cfg.gradient_accumulation_steps)
     if cfg.max_train_steps is None:
       cfg.max_train_steps = cfg.num_train_epochs * num_update_steps_per_epoch
     
@@ -119,7 +121,7 @@ def main():
           num_warmup_steps=cfg.num_warmup_steps * cfg.gradient_accumulation_steps,
           num_training_steps=cfg.max_train_steps * cfg.gradient_accumulation_steps,
       )
-
+    print("다음 시작")
     with accelerator.main_process_first():
       if cfg.resume_from_checkpoint:
             if cfg.resume_from_checkpoint is not None or cfg.resume_from_checkpoint != "":
@@ -132,10 +134,13 @@ def main():
 
     starting_epoch, completed_steps, best_loss, save_epoch = 0, 0, np.inf, 0
     progress_bar = tqdm(range(cfg.max_train_steps), disable=not accelerator.is_local_main_process)
-    
+    print("다음 시작22")
+
+    torch.cuda.empty_cache()
     for epoch in range(starting_epoch, cfg.num_train_epochs):
         accelerator.print(f"-------------------EPOCH{epoch}-------------------------" )
         total_loss, total_val_loss = 0, 0
+        print("\n\n---Start training---\n\n")
         model.train()
         for batch_idx, (wav, descriptions, lengths) in enumerate(audio_dataloader):
             with accelerator.accumulate(model):
@@ -155,7 +160,10 @@ def main():
                 if accelerator.sync_gradients:
                     progress_bar.update(1)
                     completed_steps += 1
-                    
+            torch.cuda.empty_cache()
+        
+
+        # Evaluate by validation set. validation loss will be used.
         model.eval()
         for batch_idx, (wav, descriptions, lengths) in enumerate(eval_dataloader):
             with accelerator.accumulate(model):
@@ -174,8 +182,8 @@ def main():
             result["train_loss"] = round(total_loss.item()/cfg.save_steps, 4)
             result["valid_loss"] = round(total_val_loss.item()/len(eval_dataloader), 4)
             
-            result_string = "Epoch: {}, Loss Train: {}, Valid: {}\n".format(save_epoch + 1, result["train_loss"], result["valid_loss"])    
-            accelerator.print(result_string) 
+            result_string = "Epoch: {}, Loss Train: {}, Valid: {}\n".format(save_epoch + 1, result["train_loss"], result["valid_loss"])
+            accelerator.print(result_string)
             unwrapped_model = accelerator.unwrap_model(model)
             unwrapped_vae = accelerator.unwrap_model(compression_model)
             best_loss = save_checkpoint(cfg, unwrapped_model, result, best_loss, save_epoch)
