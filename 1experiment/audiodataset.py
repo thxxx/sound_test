@@ -7,21 +7,15 @@ import torch
 EPS = torch.finfo(torch.float32).eps
 
 class AudioDataset(Dataset):
-    def __init__(self, cfg, data_path, train=True):
+    def __init__(self, cfg, data_path, train=True, mixed=False):
         self.train = train
         
         self.target_sample_rate = cfg.sample_rate
         self.duration = cfg.duration
         self.device = cfg.device
         self.data_path = data_path
-        self.mixed = False
-        self.df = ""
-
-        if isinstance(data_path, list):
-            self.mixed = True
-            self.df = pd.concat([pd.read_csv(f) for f in data_path])
-        else:
-            self.df = pd.read_csv(data_path)
+        self.mixed = mixed
+        self.df = pd.read_csv(data_path)
 
     def __len__(self):
         return len(self.df)

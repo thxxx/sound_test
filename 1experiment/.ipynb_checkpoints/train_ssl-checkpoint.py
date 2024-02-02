@@ -16,6 +16,7 @@ from audiocraft.modules.conditioners import JointEmbedCondition, SegmentWithAttr
 from config import Config
 from audiomodel import AudioProcessing
 from audiodataset import AudioDataset, TestDataset
+from utils import Logger
 
 def make_dir(path):
     if not os.path.exists(path):
@@ -76,27 +77,11 @@ def sampler(dataset):
     random.shuffle(indices)
     return iter(indices)
 
-def logging():
-    text = f""
-    # Open a file in write mode
-    with open('logs.txt', 'a') as file:
-        file.write(text)
-    return ""
-
-class Logger():
-    def __init__(self):
-        self.tt = ""
-
-    def init(self):
-        random_text = "aaa"
-        os.makedir(random_text)
-
-    def logging():
-        
-
 def main():
-    train_data_path = "../csv_files/dummy_test.csv"
-    eval_data_path = "../csv_files/dummy_test.csv"
+    # train_data_path = "../csv_files/train_total_mixed_csv.csv" # 이거만 Mix인지 아닌지 바꾸면 됨.
+    train_data_path = "../csv_files/train_combined_csv.csv"
+    eval_data_path = "../csv_files/valid_combined_csv.csv"
+    logger = Logger()
     
     cfg = Config()
     cfg.update(train_data_path=train_data_path, eval_data_path=eval_data_path)
@@ -115,7 +100,8 @@ def main():
     test_dataset = TestDataset(cfg)
 
     print("데이터셋 준비")
-    audio_dataloader = DataLoader(audio_dataset, batch_size=cfg.batch_size, shuffle=False, sampler=sampler(audio_dataset), num_workers=12)
+    train_sampler = RandomSampler(audio_dataset, num_samples=cfg.train_sample_num, replacement=True)
+    audio_dataloader = DataLoader(audio_dataset, batch_size=cfg.batch_size, shuffle=False, sampler=train_sampler, num_workers=12)
     eval_dataloader = DataLoader(eval_dataset, batch_size=cfg.eval_batch_size, shuffle=False, num_workers=4)
     test_dataloader = DataLoader(test_dataset, batch_size=1)
     print("데이터셋 준비 끝")
@@ -154,6 +140,8 @@ def main():
     progress_bar = tqdm(range(cfg.max_train_steps), disable=not accelerator.is_local_main_process)
     print("다음 시작22")
 
+    logger.init()
+
     torch.cuda.empty_cache()
     for epoch in range(starting_epoch, cfg.num_train_epochs):
         accelerator.print(f"-------------------EPOCH{epoch}-------------------------" )
@@ -162,36 +150,53 @@ def main():
         model.train()
         for batch_idx, (wav, descriptions, lengths) in enumerate(audio_dataloader):
             with accelerator.accumulate(model):
-                with torch.no_grad():
-                    unwrapped_vae = accelerator.unwrap_model(compression_model)
-                    audio_tokens = process_audio_tokenizer(wav, unwrapped_vae)
-                    audio_tokens, padding_mask = post_process_audio_tokenizer(audio_tokens, lengths, unwrapped_vae, lm, cfg)
-                    attributes = [ConditioningAttributes(text={'description': description}) for description in descriptions]
-                loss = model(audio_tokens, padding_mask, attributes)
-                ppl =  torch.exp(loss)
-                total_loss += loss.detach().float()
-                accelerator.backward(loss)
-                optimizer.step()
-                lr_scheduler.step()
-                optimizer.zero_grad()
+                with accelerator.autocast():
+                    with torch.no_grad():
+                        unwrapped_vae = accelerator.unwrap_model(compression_model)
+                        audio_tokens = process_audio_tokenizer(wav, unwrapped_vae)
+                        audio_tokens, padding_mask = post_process_audio_tokenizer(audio_tokens, lengths, unwrapped_vae, lm, cfg)
+                        attributes = [ConditioningAttributes(text={'description': description}) for description in descriptions]
+                    loss = model(audio_tokens, padding_mask, attributes)
+                    ppl =  torch.exp(loss)
+                    total_loss += loss.detach().float()
+                    accelerator.backward(loss)
+                    optimizer.step()
+                    lr_scheduler.step()
+                    optimizer.zero_grad()
+                    # print(loss)
+                    
+                    if accelerator.sync_gradients:
+                        progress_bar.update(1)
+                        completed_steps += 1
+            if batch_idx%100==99:
+                logger.log(total_loss.cpu().detach().clone()/batch_idx, train=True)
+                logger.logging(f"Batch idx : {batch_idx}, {total_loss/batch_idx}")
                 
-                if accelerator.sync_gradients:
-                    progress_bar.update(1)
-                    completed_steps += 1
-            torch.cuda.empty_cache()
+                
+        del loss
+        del ppl
+        torch.cuda.empty_cache()
+        
+        logger.log(total_loss.cpu().detach().clone()/(len(audio_dataset)*cfg.batch_size), train=True)
+        logger.draw_loss(train=True)
         
 
         # Evaluate by validation set. validation loss will be used.
         model.eval()
         for batch_idx, (wav, descriptions, lengths) in enumerate(eval_dataloader):
             with accelerator.accumulate(model):
-                with torch.no_grad():
-                    unwrapped_vae = accelerator.unwrap_model(compression_model)
-                    audio_tokens = process_audio_tokenizer(wav, unwrapped_vae)
-                    audio_tokens, padding_mask = post_process_audio_tokenizer(audio_tokens, lengths, unwrapped_vae, lm, cfg) 
-                    attributes = [ConditioningAttributes(text={'description': description}) for description in descriptions]
-                    loss = model(audio_tokens, padding_mask, attributes)
-                    total_val_loss += loss  
+                with accelerator.autocast():
+                    with torch.no_grad():
+                        unwrapped_vae = accelerator.unwrap_model(compression_model)
+                        audio_tokens = process_audio_tokenizer(wav, unwrapped_vae)
+                        audio_tokens, padding_mask = post_process_audio_tokenizer(audio_tokens, lengths, unwrapped_vae, lm, cfg) 
+                        attributes = [ConditioningAttributes(text={'description': description}) for description in descriptions]
+                        loss = model(audio_tokens, padding_mask, attributes)
+                        total_val_loss += loss.detach().clone()
+
+        logger.log(total_val_loss.cpu().detach().clone(), train=False)
+        logger.draw_loss(train=False) 
+        torch.cuda.empty_cache()
     
         if accelerator.is_main_process:         
             result = {}
@@ -202,6 +207,7 @@ def main():
             
             result_string = "Epoch: {}, Loss Train: {}, Valid: {}\n".format(save_epoch + 1, result["train_loss"], result["valid_loss"])
             accelerator.print(result_string)
+            logger.logging(result_string)
             unwrapped_model = accelerator.unwrap_model(model)
             unwrapped_vae = accelerator.unwrap_model(compression_model)
             best_loss = save_checkpoint(cfg, unwrapped_model, result, best_loss, save_epoch)

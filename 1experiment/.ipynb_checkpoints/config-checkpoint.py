@@ -42,9 +42,10 @@ class Config:
         self.condition_dim = 1536
 
     def update_hyperparameter_config(self):
-        self.batch_size = 1
-        self.eval_batch_size = 2
-        self.learning_rate = 3e-6
+        self.batch_size = 64
+        self.eval_batch_size = 64
+        self.learning_rate = 1e-5
+        # self.learning_rate = 3e-6
         self.adam_beta1 = 0.9
         self.adam_beta2 = 0.999
         self.adam_weight_decay = 1e-2
@@ -54,16 +55,17 @@ class Config:
         self.gradient_accumulation_steps = 1
 
     def update_train_config(self):
+        self.train_sample_num = 150000
         self.num_train_epochs = 1000
         self.num_warmup_steps = 0
         self.max_train_steps = None
         self.device = 'cuda' 
-        self.output_dir = "./output_dir_finetune"
-        self.generated_dir = './generated_audios_finetune'
-        self.save_path = './generated_audios_finetune'
+        self.output_dir = "./output_dir_finetune_normal"
+        self.generated_dir = './generated_audios_finetune_normal'
+        self.save_path = './generated_audios_finetune_normal'
         self.checkpointing_steps = "best"
         self.save_steps = 20
-        self.resume_from_checkpoint = None
+        self.resume_from_checkpoint = "./weight/best.pth"
         self.resume_epoch = 0 
         self.wandb_project_name = "musicgen-mixed-data-1"
         self.wandb_id = None 
